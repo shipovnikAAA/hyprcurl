@@ -1,0 +1,42 @@
+[package]
+name = "curl-cffi-rs"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "curl_cffi_rs"
+crate-type = ["rlib", "cdylib"]  # cdylib for Python bindings
+
+[dependencies]
+curl-sys = "0.4"
+libc = "0.2"
+thiserror = "2.0"
+bytes = "1.9"
+
+# Async support
+tokio = { version = "1", features = ["full"], optional = true }
+futures = { version = "0.3", optional = true }
+
+# Python bindings
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }
+criterion = "0.5"
+
+[features]
+default = []
+async = ["tokio", "futures"]
+python = ["pyo3"]
+
+[[bench]]
+name = "curl_bench"
+harness = false
+
+[[example]]
+name = "simple_request"
+required-features = []
+
+[[example]]
+name = "async_request"
+required-features = ["async"]
