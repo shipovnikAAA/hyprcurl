@@ -27,6 +27,17 @@ pub enum CurlOpt {
     CookieJar,
     HttpVersion,
     CustomRequest,
+    SslCert,
+    SslKey,
+    SslKeyType,
+    SslEngine,
+    SslDefaultEngine,
+    ProxyCaInfo,
+    ProxyCaPath,
+    ProxySslCert,
+    ProxySslKey,
+    ProxySslVerifyPeer,
+    ProxySslVerifyHost,
 }
 
 impl CurlOpt {
@@ -55,6 +66,17 @@ impl CurlOpt {
             CurlOpt::CookieJar => CURLOPT_COOKIEJAR,
             CurlOpt::HttpVersion => CURLOPT_HTTP_VERSION,
             CurlOpt::CustomRequest => CURLOPT_CUSTOMREQUEST,
+            CurlOpt::SslCert => CURLOPT_SSLCERT,
+            CurlOpt::SslKey => CURLOPT_SSLKEY,
+            CurlOpt::SslKeyType => CURLOPT_SSLKEYTYPE,
+            CurlOpt::SslEngine => CURLOPT_SSLENGINE,
+            CurlOpt::SslDefaultEngine => CURLOPT_SSLENGINE_DEFAULT,
+            CurlOpt::ProxyCaInfo => CURLOPT_PROXY_CAINFO,
+            CurlOpt::ProxyCaPath => CURLOPT_PROXY_CAPATH,
+            CurlOpt::ProxySslCert => CURLOPT_PROXY_SSLCERT,
+            CurlOpt::ProxySslKey => CURLOPT_PROXY_SSLKEY,
+            CurlOpt::ProxySslVerifyPeer => CURLOPT_PROXY_SSL_VERIFYPEER,
+            CurlOpt::ProxySslVerifyHost => CURLOPT_PROXY_SSL_VERIFYHOST,
         }
     }
 }

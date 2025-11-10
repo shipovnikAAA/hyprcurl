@@ -12,6 +12,8 @@ curl-sys = "0.4"
 libc = "0.2"
 thiserror = "2.0"
 bytes = "1.9"
+# For CA certificate detection
+dirs = "5.0"
 
 # Async support
 tokio = { version = "1", features = ["full"], optional = true }

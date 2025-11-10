@@ -21,7 +21,7 @@ pub struct Curl {
     stored_strings: Vec<CString>,
     stored_url: Option<CString>,
     stored_postfields: Option<CString>,
-    stored_headers: Vec<CString>,  // Keep header strings alive
+    stored_headers: Vec<CString>, // Keep header strings alive
 }
 
 impl Curl {
@@ -58,6 +58,21 @@ impl Curl {
 
         // Disable signals (important for multi-threading)
         curl.setopt_long(CurlOpt::NoSignal, 1)?;
+        
+        // Set follow redirects
+        curl.setopt_long(CurlOpt::FollowLocation, 1)?;
+        
+        // Set user agent to avoid default issues
+        curl.setopt_str(CurlOpt::UserAgent, "curl-cffi-rs/0.1.0")?;
+        
+        // Set secure SSL defaults (like curl-cffi Python)
+        curl.set_ssl_verify(None)?; // Enable SSL verification with default CA
+
+        // Set follow redirects
+        curl.setopt_long(CurlOpt::FollowLocation, 1)?;
+
+        // Set user agent to avoid default issues
+        curl.setopt_str(CurlOpt::UserAgent, "curl-cffi-rs/0.1.0")?;
 
         Ok(curl)
     }
@@ -66,11 +81,8 @@ impl Curl {
     pub fn set_url(&mut self, url: &str) -> Result<()> {
         let c_url = CString::new(url).map_err(|_| CurlError::InvalidUrl(url.to_string()))?;
         unsafe {
-            let code = curl_sys::curl_easy_setopt(
-                self.handle,
-                curl_sys::CURLOPT_URL,
-                c_url.as_ptr(),
-            );
+            let code =
+                curl_sys::curl_easy_setopt(self.handle, curl_sys::CURLOPT_URL, c_url.as_ptr());
             check_code(code)?;
         }
         // Store the URL to keep it alive
@@ -189,23 +201,46 @@ impl Curl {
 
     /// Perform the request and return response data
     pub fn perform(&mut self, buffer: &mut Vec<u8>) -> Result<()> {
-        // Use Box to keep Vec address stable during reallocation
-        let mut buffer_box = Box::new(Vec::new());
+        use std::os::raw::c_void;
 
+        // Clear the buffer first
+        buffer.clear();
+
+        // Use a simple approach with a captured buffer
         unsafe {
+            // Set write function using a closure that captures the buffer
+            extern "C" fn write_func(
+                ptr: *mut c_char,
+                size: usize,
+                nmemb: usize,
+                userdata: *mut c_void,
+            ) -> usize {
+                let total_size = size * nmemb;
+                if total_size == 0 || ptr.is_null() {
+                    return 0;
+                }
+
+                unsafe {
+                    let buffer = &mut *(userdata as *mut Vec<u8>);
+                    let data = std::slice::from_raw_parts(ptr as *const u8, total_size);
+                    buffer.extend_from_slice(data);
+                }
+                total_size
+            }
+
             // Set write function
             let code = curl_sys::curl_easy_setopt(
                 self.handle,
                 curl_sys::CURLOPT_WRITEFUNCTION,
-                write_callback as *const c_void,
+                write_func as *const c_void,
             );
             check_code(code)?;
 
-            // Set write data - pointer to Box (stable address)
+            // Set write data
             let code = curl_sys::curl_easy_setopt(
                 self.handle,
                 curl_sys::CURLOPT_WRITEDATA,
-                &mut buffer_box as *mut Box<Vec<u8>> as *mut c_void,
+                buffer as *mut Vec<u8> as *mut c_void,
             );
             check_code(code)?;
 
@@ -223,10 +258,6 @@ impl Curl {
             let code = curl_sys::curl_easy_perform(self.handle);
             check_code(code)?;
         }
-
-        // Move data from Box<Vec> to the provided buffer
-        buffer.clear();
-        buffer.append(&mut *buffer_box);
 
         Ok(())
     }
@@ -249,11 +280,8 @@ impl Curl {
     pub fn total_time(&self) -> Result<f64> {
         let mut time: f64 = 0.0;
         unsafe {
-            let ret = curl_sys::curl_easy_getinfo(
-                self.handle,
-                curl_sys::CURLINFO_TOTAL_TIME,
-                &mut time,
-            );
+            let ret =
+                curl_sys::curl_easy_getinfo(self.handle, curl_sys::CURLINFO_TOTAL_TIME, &mut time);
             check_code(ret)?;
         }
         Ok(time)
@@ -305,6 +333,119 @@ impl Curl {
     pub fn raw_handle(&self) -> *mut curl_sys::CURL {
         self.handle
     }
+
+    /// Set SSL verification behavior
+    /// 
+    /// # Arguments
+    /// * `verify` - SSL verification mode:
+    ///   - `true` or `None`: Enable SSL verification (default, secure)
+    ///   - `false`: Disable SSL verification (insecure, for testing only)
+    ///   - `Some(path)`: Use custom CA certificate file
+    pub fn set_ssl_verify(&mut self, verify: Option<bool>) -> Result<()> {
+        match verify {
+            None | Some(true) => {
+                // Enable SSL verification (secure default)
+                self.setopt_long(CurlOpt::SslVerifyPeer, 1)?;
+                self.setopt_long(CurlOpt::SslVerifyHost, 2)?; // 2 = strict hostname verification
+                
+                // Set default CA certificate if available
+                if let Some(ca_path) = Self::get_default_ca_bundle() {
+                    self.setopt_str(CurlOpt::CaInfo, &ca_path)?;
+                }
+            }
+            Some(false) => {
+                // Disable SSL verification (insecure)
+                self.setopt_long(CurlOpt::SslVerifyPeer, 0)?;
+                self.setopt_long(CurlOpt::SslVerifyHost, 0)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Set custom CA certificate file
+    pub fn set_ca_cert_file(&mut self, ca_path: &str) -> Result<()> {
+        self.setopt_str(CurlOpt::CaInfo, ca_path)
+    }
+
+    /// Set client certificate for authentication
+    pub fn set_client_cert(&mut self, cert_path: &str, key_path: Option<&str>) -> Result<()> {
+        self.setopt_str(CurlOpt::SslCert, cert_path)?;
+        if let Some(key) = key_path {
+            self.setopt_str(CurlOpt::SslKey, key)?;
+        }
+        Ok(())
+    }
+
+    /// Get default CA certificate bundle path
+    /// 
+    /// This follows the same logic as curl-cffi Python:
+    /// 1. Check environment variables (REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE)
+    /// 2. Fall back to system-specific default paths
+    /// 3. Use certifi-like bundled certificates if available
+    fn get_default_ca_bundle() -> Option<String> {
+        // Check environment variables first (like curl-cffi)
+        if let Ok(ca_bundle) = std::env::var("REQUESTS_CA_BUNDLE") {
+            if std::path::Path::new(&ca_bundle).exists() {
+                return Some(ca_bundle);
+            }
+        }
+        
+        if let Ok(ca_bundle) = std::env::var("CURL_CA_BUNDLE") {
+            if std::path::Path::new(&ca_bundle).exists() {
+                return Some(ca_bundle);
+            }
+        }
+
+        // Check SSL_CERT_FILE (OpenSSL style)
+        if let Ok(cert_file) = std::env::var("SSL_CERT_FILE") {
+            if std::path::Path::new(&cert_file).exists() {
+                return Some(cert_file);
+            }
+        }
+
+        // System-specific default paths
+        #[cfg(target_os = "linux")]
+        {
+            let paths = [
+                "/etc/ssl/certs/ca-certificates.crt",
+                "/etc/ssl/certs/ca-bundle.crt",
+                "/etc/pki/tls/certs/ca-bundle.crt",
+                "/usr/share/ca-certificates/ca-certificates.crt",
+            ];
+            for path in &paths {
+                if std::path::Path::new(path).exists() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let paths = [
+                "/etc/ssl/cert.pem",
+                "/usr/local/etc/openssl/cert.pem",
+                "/opt/homebrew/etc/openssl@3/cert.pem",
+            ];
+            for path in &paths {
+                if std::path::Path::new(path).exists() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(program_files) = dirs::config_dir() {
+                let cert_path = program_files.join("curl-ca-bundle.crt");
+                if cert_path.exists() {
+                    return Some(cert_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // No default CA bundle found
+        None
+    }
 }
 
 impl Drop for Curl {
@@ -320,33 +461,6 @@ impl Drop for Curl {
 
 // Make sure Curl is Send (safe to send across threads)
 unsafe impl Send for Curl {}
-
-// Write callback function - MUST match curl's signature exactly
-unsafe extern "C" fn write_callback(
-    ptr: *mut c_char,
-    size: usize,
-    nmemb: usize,
-    userdata: *mut c_void,
-) -> usize {
-    // Calculate total bytes
-    let total_size = size * nmemb;
-
-    // Handle zero-size writes
-    if total_size == 0 {
-        return 0;
-    }
-
-    // Get Box<Vec<u8>> from userdata (Box pointer is stable)
-    let buffer_box = &mut *(userdata as *mut Box<Vec<u8>>);
-    let buffer = buffer_box.as_mut();
-
-    // Create slice from C data and copy to buffer
-    let data = std::slice::from_raw_parts(ptr as *const u8, total_size);
-    buffer.extend_from_slice(data);
-
-    // MUST return total bytes processed
-    total_size
-}
 
 #[cfg(test)]
 mod tests {

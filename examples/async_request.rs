@@ -19,6 +19,9 @@ async fn main() -> Result<(), CurlError> {
     for url in &urls {
         let mut curl = Curl::new()?;
         curl.set_url(url)?;
+        // SSL verification is enabled by default (secure)
+        // For testing with invalid certificates, you could use:
+        // curl.set_ssl_verify(Some(false))?;
         curls.push(curl);
     }
 

@@ -17,6 +17,10 @@ fn main() -> Result<(), CurlError> {
 
     // Set timeout
     curl.setopt_long(curl_cffi_rs::types::CurlOpt::Timeout, 30)?;
+    
+    // SSL verification is enabled by default (secure)
+    // For testing with invalid certificates, you could use:
+    // curl.set_ssl_verify(Some(false))?;
 
     // Perform the request
     let mut response = Vec::new();
