@@ -42,3 +42,7 @@ required-features = []
 [[example]]
 name = "async_request"
 required-features = ["async"]
+
+[[example]]
+name = "browser_impersonation"
+required-features = []

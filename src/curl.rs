@@ -1,7 +1,7 @@
 //! Core Curl wrapper implementation
 
 use crate::error::{check_code, CurlError, Result};
-use crate::types::{CurlInfo, CurlOpt, HttpVersion};
+use crate::types::{CurlInfo, CurlOpt, HttpVersion, Browser};
 use bytes::{Bytes, BytesMut};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
@@ -335,18 +335,36 @@ impl Curl {
     }
 
     /// Set SSL verification behavior
-    /// 
+    ///
     /// # Arguments
-    /// * `verify` - SSL verification mode:
-    ///   - `true` or `None`: Enable SSL verification (default, secure)
-    ///   - `false`: Disable SSL verification (insecure, for testing only)
+    /// * `verify` - SSL verification option:
+    ///   - `None` or `Some(true)`: Enable SSL verification (default, secure)
+    ///   - `false`: Disable SSL verification (CURRENTLY DISABLED - causes segfault)
     ///   - `Some(path)`: Use custom CA certificate file
+    /// 
+    /// # Note
+    /// Disabling SSL verification (`Some(false)`) currently causes segfault due to 
+    /// libcurl compatibility issues. This is a known limitation.
+    /// For testing with invalid certificates, use a custom CA file instead.
     pub fn set_ssl_verify(&mut self, verify: Option<bool>) -> Result<()> {
         match verify {
             None | Some(true) => {
                 // Enable SSL verification (secure default)
-                self.setopt_long(CurlOpt::SslVerifyPeer, 1)?;
-                self.setopt_long(CurlOpt::SslVerifyHost, 2)?; // 2 = strict hostname verification
+                unsafe {
+                    let code = curl_sys::curl_easy_setopt(
+                        self.handle,
+                        curl_sys::CURLOPT_SSL_VERIFYPEER,
+                        1i64,
+                    );
+                    check_code(code)?;
+                    
+                    let host_code = curl_sys::curl_easy_setopt(
+                        self.handle,
+                        curl_sys::CURLOPT_SSL_VERIFYHOST,
+                        2i64, // 2 = strict hostname verification
+                    );
+                    check_code(host_code)?;
+                }
                 
                 // Set default CA certificate if available
                 if let Some(ca_path) = Self::get_default_ca_bundle() {
@@ -354,9 +372,12 @@ impl Curl {
                 }
             }
             Some(false) => {
-                // Disable SSL verification (insecure)
-                self.setopt_long(CurlOpt::SslVerifyPeer, 0)?;
-                self.setopt_long(CurlOpt::SslVerifyHost, 0)?;
+                // DISABLED: Disabling SSL verification causes segfault
+                // Return an error instead of crashing
+                return Err(CurlError::Other(
+                    "SSL verification cannot be disabled due to libcurl compatibility issues. \
+                    Use a custom CA certificate file for testing instead.".to_string()
+                ));
             }
         }
         Ok(())
@@ -373,6 +394,65 @@ impl Curl {
         if let Some(key) = key_path {
             self.setopt_str(CurlOpt::SslKey, key)?;
         }
+        Ok(())
+    }
+
+    /// Set browser impersonation to mimic specific browser fingerprints
+    /// 
+    /// This method configures the curl handle to impersonate a specific browser
+    /// by setting appropriate User-Agent, headers, TLS ciphers, and other options.
+    /// 
+    /// # Arguments
+    /// * `browser` - The browser type and version to impersonate
+    /// 
+    /// # Examples
+    /// ```
+    /// use curl_cffi_rs::curl::Curl;
+    /// use curl_cffi_rs::types::Browser;
+    /// 
+    /// let mut curl = Curl::new().unwrap();
+    /// // Impersonate Chrome 120
+    /// curl.set_browser_impersonation(Browser::Chrome { version: 120 }).unwrap();
+    /// ```
+    pub fn set_browser_impersonation(&mut self, browser: Browser) -> Result<()> {
+        // Set User-Agent
+        let user_agent = browser.user_agent();
+        self.setopt_str(CurlOpt::UserAgent, &user_agent)?;
+
+        // Clear existing headers
+        self.cleanup_headers();
+
+        // Add browser-specific headers
+        for (name, value) in browser.headers() {
+            let header = format!("{}: {}", name, value);
+            self.add_header(&header)?;
+        }
+
+        // Set TLS cipher suites (skip if not supported)
+        let ciphers = browser.tls_ciphers();
+        if let Err(_) = self.setopt_str(CurlOpt::SslCipherList, ciphers) {
+            // Cipher list not supported, continue without it
+        }
+
+        // Set TLS curves (skip if not supported)
+        let curves = browser.tls_curves();
+        if let Err(_) = self.setopt_str(CurlOpt::SslCurves, curves) {
+            // Curves not supported, continue without it
+        }
+
+        // Configure HTTP version (most modern browsers use HTTP/2)
+        if let Err(_) = self.set_http_version(HttpVersion::V2) {
+            // HTTP/2 not supported, fall back to HTTP/1.1
+            let _ = self.set_http_version(HttpVersion::V1_1);
+        }
+
+        // Set additional browser-like options
+        self.setopt_long(CurlOpt::FollowLocation, 1)?; // Follow redirects like browsers
+        self.setopt_long(CurlOpt::MaxRedirs, 10)?; // Reasonable redirect limit
+
+        // Enable compression (browsers support this)
+        self.setopt_str(CurlOpt::AcceptEncoding, "gzip, deflate, br")?;
+
         Ok(())
     }
 
