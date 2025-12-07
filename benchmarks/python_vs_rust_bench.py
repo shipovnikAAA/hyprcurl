@@ -15,8 +15,7 @@ from io import BytesIO
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Import Python curl_cffi
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'curl_cffi'))
+# Import Python curl_cffi (from installed package)
 import curl_cffi
 from curl_cffi import Curl as PythonCurl
 from curl_cffi.requests import Session

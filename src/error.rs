@@ -1,6 +1,5 @@
 //! Error types for curl-cffi-rs
 
-use std::fmt;
 use thiserror::Error;
 
 /// Result type alias for curl operations
@@ -69,18 +68,6 @@ impl CurlError {
         CurlError::CurlCode { code, message }
     }
 
-    /// Create a CurlError from a CURLMcode (multi interface)
-    pub fn from_multi_code(code: curl_sys::CURLMcode) -> Self {
-        let message = unsafe {
-            let msg_ptr = curl_sys::curl_multi_strerror(code);
-            std::ffi::CStr::from_ptr(msg_ptr)
-                .to_string_lossy()
-                .into_owned()
-        };
-
-        CurlError::MultiError { code, message }
-    }
-
     /// Get the curl error code if available
     pub fn code(&self) -> Option<u32> {
         match self {
@@ -97,14 +84,5 @@ pub(crate) fn check_code(code: curl_sys::CURLcode) -> Result<()> {
         Ok(())
     } else {
         Err(CurlError::from_curl_code(code))
-    }
-}
-
-/// Check a CURLMcode and convert to Result
-pub(crate) fn check_multi_code(code: curl_sys::CURLMcode) -> Result<()> {
-    if code == curl_sys::CURLM_OK {
-        Ok(())
-    } else {
-        Err(CurlError::from_multi_code(code))
     }
 }

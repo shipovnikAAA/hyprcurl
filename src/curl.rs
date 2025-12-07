@@ -1,21 +1,15 @@
 //! Core Curl wrapper implementation
 
 use crate::error::{check_code, CurlError, Result};
-use crate::types::{CurlInfo, CurlOpt, HttpVersion, Browser};
-use bytes::{Bytes, BytesMut};
+use crate::types::{Browser, CurlOpt, HttpVersion};
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
+use std::os::raw::c_char;
 use std::ptr;
-
-/// Callback function type for write operations
-type WriteCallback = Box<dyn FnMut(&[u8]) -> usize>;
 
 /// Main Curl handle wrapper
 pub struct Curl {
     handle: *mut curl_sys::CURL,
     headers: *mut curl_sys::curl_slist,
-    write_callback: Option<WriteCallback>,
-    header_callback: Option<WriteCallback>,
     error_buffer: [c_char; curl_sys::CURL_ERROR_SIZE],
     // Store strings to keep them alive for libcurl
     stored_strings: Vec<CString>,
@@ -38,8 +32,6 @@ impl Curl {
         let mut curl = Curl {
             handle,
             headers: ptr::null_mut(),
-            write_callback: None,
-            header_callback: None,
             error_buffer: [0; curl_sys::CURL_ERROR_SIZE],
             stored_strings: Vec::new(),
             stored_url: None,
@@ -58,13 +50,13 @@ impl Curl {
 
         // Disable signals (important for multi-threading)
         curl.setopt_long(CurlOpt::NoSignal, 1)?;
-        
+
         // Set follow redirects
         curl.setopt_long(CurlOpt::FollowLocation, 1)?;
-        
+
         // Set user agent to avoid default issues
         curl.setopt_str(CurlOpt::UserAgent, "curl-cffi-rs/0.1.0")?;
-        
+
         // Set secure SSL defaults (like curl-cffi Python)
         curl.set_ssl_verify(None)?; // Enable SSL verification with default CA
 
@@ -177,10 +169,44 @@ impl Curl {
         Ok(())
     }
 
+    /// Set HTTP/SOCKS proxy
+    ///
+    /// Supports: http://, https://, socks4://, socks4a://, socks5://, socks5h://
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use curl_cffi_rs::Curl;
+    /// let mut curl = Curl::new().unwrap();
+    /// curl.set_proxy("http://localhost:3128").unwrap();
+    /// curl.set_proxy("socks5://localhost:1080").unwrap();
+    /// ```
+    pub fn set_proxy(&mut self, proxy: &str) -> Result<()> {
+        self.setopt_str(CurlOpt::Proxy, proxy)
+    }
+
+    /// Set proxy with authentication
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use curl_cffi_rs::Curl;
+    /// let mut curl = Curl::new().unwrap();
+    /// curl.set_proxy_with_auth("http://localhost:3128", "user", "pass").unwrap();
+    /// ```
+    pub fn set_proxy_with_auth(
+        &mut self,
+        proxy: &str,
+        username: &str,
+        password: &str,
+    ) -> Result<()> {
+        self.set_proxy(proxy)?;
+        let auth = format!("{}:{}", username, password);
+        self.setopt_str(CurlOpt::ProxyUserPwd, &auth)
+    }
+
     /// Impersonate a browser
     ///
     /// Note: This requires libcurl-impersonate
-    pub fn impersonate(&mut self, target: &str, default_headers: bool) -> Result<()> {
+    pub fn impersonate(&mut self, target: &str, _default_headers: bool) -> Result<()> {
         let c_target = CString::new(target)
             .map_err(|_| CurlError::InvalidOption(format!("Invalid target: {}", target)))?;
 
@@ -341,9 +367,9 @@ impl Curl {
     ///   - `None` or `Some(true)`: Enable SSL verification (default, secure)
     ///   - `false`: Disable SSL verification (CURRENTLY DISABLED - causes segfault)
     ///   - `Some(path)`: Use custom CA certificate file
-    /// 
+    ///
     /// # Note
-    /// Disabling SSL verification (`Some(false)`) currently causes segfault due to 
+    /// Disabling SSL verification (`Some(false)`) currently causes segfault due to
     /// libcurl compatibility issues. This is a known limitation.
     /// For testing with invalid certificates, use a custom CA file instead.
     pub fn set_ssl_verify(&mut self, verify: Option<bool>) -> Result<()> {
@@ -357,7 +383,7 @@ impl Curl {
                         1i64,
                     );
                     check_code(code)?;
-                    
+
                     let host_code = curl_sys::curl_easy_setopt(
                         self.handle,
                         curl_sys::CURLOPT_SSL_VERIFYHOST,
@@ -365,7 +391,7 @@ impl Curl {
                     );
                     check_code(host_code)?;
                 }
-                
+
                 // Set default CA certificate if available
                 if let Some(ca_path) = Self::get_default_ca_bundle() {
                     self.setopt_str(CurlOpt::CaInfo, &ca_path)?;
@@ -376,7 +402,8 @@ impl Curl {
                 // Return an error instead of crashing
                 return Err(CurlError::Other(
                     "SSL verification cannot be disabled due to libcurl compatibility issues. \
-                    Use a custom CA certificate file for testing instead.".to_string()
+                    Use a custom CA certificate file for testing instead."
+                        .to_string(),
                 ));
             }
         }
@@ -398,18 +425,18 @@ impl Curl {
     }
 
     /// Set browser impersonation to mimic specific browser fingerprints
-    /// 
+    ///
     /// This method configures the curl handle to impersonate a specific browser
     /// by setting appropriate User-Agent, headers, TLS ciphers, and other options.
-    /// 
+    ///
     /// # Arguments
     /// * `browser` - The browser type and version to impersonate
-    /// 
+    ///
     /// # Examples
     /// ```
     /// use curl_cffi_rs::curl::Curl;
     /// use curl_cffi_rs::types::Browser;
-    /// 
+    ///
     /// let mut curl = Curl::new().unwrap();
     /// // Impersonate Chrome 120
     /// curl.set_browser_impersonation(Browser::Chrome { version: 120 }).unwrap();
@@ -457,7 +484,7 @@ impl Curl {
     }
 
     /// Get default CA certificate bundle path
-    /// 
+    ///
     /// This follows the same logic as curl-cffi Python:
     /// 1. Check environment variables (REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE)
     /// 2. Fall back to system-specific default paths
@@ -469,7 +496,7 @@ impl Curl {
                 return Some(ca_bundle);
             }
         }
-        
+
         if let Ok(ca_bundle) = std::env::var("CURL_CA_BUNDLE") {
             if std::path::Path::new(&ca_bundle).exists() {
                 return Some(ca_bundle);

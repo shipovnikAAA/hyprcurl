@@ -1,58 +1,54 @@
 //! Browser impersonation example
-//! 
-//! This example demonstrates how to use curl-cffi-rs to impersonate different browsers
-//! and test the browser fingerprinting capabilities.
+//!
+//! This example demonstrates how to impersonate different browsers
+//! to avoid bot detection.
 
-use curl_cffi_rs::curl::Curl;
-use curl_cffi_rs::types::Browser;
+use curl_cffi_rs::{Browser, Request};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Browser Impersonation Demo ===\n");
+    println!("=== Browser Impersonation Examples ===\n");
 
-    // Test URLs
-    let urls = vec![
-        "https://httpbin.org/user-agent",
-        "https://httpbin.org/headers",
-    ];
+    // Test with Chrome (latest)
+    println!("1. Impersonating Chrome (latest):");
+    let response = Request::get("https://httpbin.org/user-agent")
+        .impersonate(Browser::ChromeLatest)
+        .send()?;
 
-    let browsers = vec![
-        Browser::Chrome { version: 120 },
-        Browser::Firefox { version: 121 },
-        Browser::Edge { version: 120 },
-        Browser::Safari { version: "17.0".to_string() },
-    ];
+    println!("Response: {}\n", String::from_utf8_lossy(&response));
 
-    for (i, browser) in browsers.iter().enumerate() {
-        println!("{}. Testing {:?}\n", i + 1, browser);
-        
-        for url in &urls {
-            println!("Testing URL: {}", url);
-            
-            let mut curl = Curl::new()?;
-            
-            // Set browser impersonation
-            curl.set_browser_impersonation(browser.clone())?;
-            curl.set_url(url)?;
-            
-            // Create buffer for response
-            let mut response_buffer = Vec::new();
-            
-            // Perform the request
-            match curl.perform(&mut response_buffer) {
-                Ok(_) => {
-                    let status_code = curl.response_code()?;
-                    println!("Status: {}", status_code);
-                    println!("Response preview: {}...\n", 
-                            String::from_utf8_lossy(&response_buffer).chars().take(200).collect::<String>());
-                }
-                Err(e) => {
-                    println!("Error: {}\n", e);
-                }
-            }
-        }
-        
-        println!("{}", "=".repeat(50));
-    }
+    // Test with specific Chrome version
+    println!("2. Impersonating Chrome 110:");
+    let response = Request::get("https://httpbin.org/user-agent")
+        .impersonate(Browser::Chrome { version: 110 })
+        .send()?;
+
+    println!("Response: {}\n", String::from_utf8_lossy(&response));
+
+    // Test with Firefox
+    println!("3. Impersonating Firefox (latest):");
+    let response = Request::get("https://httpbin.org/user-agent")
+        .impersonate(Browser::FirefoxLatest)
+        .send()?;
+
+    println!("Response: {}\n", String::from_utf8_lossy(&response));
+
+    // Test with Safari
+    println!("4. Impersonating Safari (latest):");
+    let response = Request::get("https://httpbin.org/user-agent")
+        .impersonate(Browser::SafariLatest)
+        .send()?;
+
+    println!("Response: {}\n", String::from_utf8_lossy(&response));
+
+    // Real-world example: TLS fingerprint test
+    println!("5. Testing TLS fingerprint with Chrome:");
+    let response = Request::get("https://tls.browserleaks.com/json")
+        .impersonate(Browser::ChromeLatest)
+        .send()?;
+
+    println!("TLS Fingerprint Response (first 500 chars):");
+    let body = String::from_utf8_lossy(&response);
+    println!("{}\n", body.chars().take(500).collect::<String>());
 
     Ok(())
 }

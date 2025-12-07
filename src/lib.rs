@@ -2,37 +2,37 @@
 //!
 //! A high-performance Rust implementation of curl_cffi with browser fingerprinting support.
 //!
-//! This crate provides a safe, ergonomic wrapper around libcurl-impersonate with:
+//! This crate provides a safe, ergonomic wrapper around libcurl with:
 //! - Zero-cost abstractions
 //! - Type-safe API
-//! - Async/await support (via tokio)
-//! - WebSocket support
+//! - Browser impersonation support
 //! - Python bindings (via PyO3)
 //!
 //! ## Example
 //!
 //! ```no_run
-//! use curl_cffi_rs::{Curl, CurlError};
+//! use curl_cffi_rs::{Request, Browser};
 //!
-//! fn main() -> Result<(), CurlError> {
-//!     let mut curl = Curl::new()?;
-//!     curl.set_url("https://httpbin.org/get")?;
+//! // Simple GET
+//! let response = Request::get("https://httpbin.org/get").send().unwrap();
 //!
-//!     let mut response = Vec::new();
-//!     curl.perform(&mut response)?;
+//! // With browser impersonation
+//! let response = Request::get("https://tls.browserleaks.com/json")
+//!     .impersonate(Browser::ChromeLatest)
+//!     .send()
+//!     .unwrap();
 //!
-//!     println!("Response: {}", String::from_utf8_lossy(&response));
-//!     Ok(())
-//! }
+//! // With proxy
+//! let response = Request::get("https://httpbin.org/get")
+//!     .impersonate(Browser::ChromeLatest)
+//!     .proxies("http://localhost:3128")
+//!     .send()
+//!     .unwrap();
 //! ```
 
 pub mod curl;
 pub mod error;
 pub mod types;
-pub mod websocket;
-
-#[cfg(feature = "async")]
-pub mod async_curl;
 
 #[cfg(feature = "python")]
 pub mod python;
@@ -40,14 +40,133 @@ pub mod python;
 // Re-exports
 pub use curl::Curl;
 pub use error::{CurlError, Result};
-pub use types::{CurlInfo, CurlOpt, HttpVersion};
-pub use websocket::WebSocket;
-
-#[cfg(feature = "async")]
-pub use async_curl::AsyncCurl;
+pub use types::{Browser, CurlInfo, CurlOpt, HttpVersion};
 
 // Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Request builder for ergonomic API (Rust equivalent of Python curl_cffi)
+///
+/// # Examples
+/// ```no_run
+/// use curl_cffi_rs::{Request, Browser};
+///
+/// // Simple GET
+/// let response = Request::get("https://httpbin.org/get").send().unwrap();
+///
+/// // GET with browser impersonation
+/// let response = Request::get("https://tls.browserleaks.com/json")
+///     .impersonate(Browser::ChromeLatest)
+///     .send()
+///     .unwrap();
+///
+/// // GET with impersonate and proxy
+/// let response = Request::get("https://httpbin.org/get")
+///     .impersonate(Browser::Chrome { version: 110 })
+///     .proxies("http://localhost:3128")
+///     .send()
+///     .unwrap();
+///
+/// // POST request
+/// let response = Request::post("https://httpbin.org/post", r#"{"key": "value"}"#)
+///     .impersonate(Browser::ChromeLatest)
+///     .proxies("socks5://localhost:1080")
+///     .send()
+///     .unwrap();
+/// ```
+pub struct Request {
+    url: String,
+    data: Option<String>,
+    impersonate: Option<Browser>,
+    proxies: Option<String>,
+}
+
+impl Request {
+    /// Create a GET request
+    pub fn get(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            data: None,
+            impersonate: None,
+            proxies: None,
+        }
+    }
+
+    /// Create a POST request
+    pub fn post(url: impl Into<String>, data: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            data: Some(data.into()),
+            impersonate: None,
+            proxies: None,
+        }
+    }
+
+    /// Set browser impersonation (equivalent to Python's `impersonate="chrome"`)
+    pub fn impersonate(mut self, browser: Browser) -> Self {
+        self.impersonate = Some(browser);
+        self
+    }
+
+    /// Set proxy (equivalent to Python's `proxies={"https": "..."}`)
+    pub fn proxies(mut self, proxy: impl Into<String>) -> Self {
+        self.proxies = Some(proxy.into());
+        self
+    }
+
+    /// Execute the request and return response body
+    pub fn send(self) -> Result<Vec<u8>> {
+        let mut curl = Curl::new()?;
+
+        if let Some(browser) = self.impersonate {
+            curl.set_browser_impersonation(browser)?;
+        }
+
+        if let Some(proxy) = &self.proxies {
+            curl.set_proxy(proxy)?;
+        }
+
+        curl.set_url(&self.url)?;
+
+        if let Some(data) = &self.data {
+            curl.set_post_data(data)?;
+        }
+
+        let mut buffer = Vec::new();
+        curl.perform(&mut buffer)?;
+        Ok(buffer)
+    }
+}
+
+/// Quick GET request (convenience function for simple cases)
+///
+/// For advanced usage with impersonate/proxies, use: `Request::get(url).impersonate(...).send()`
+///
+/// # Examples
+/// ```no_run
+/// use curl_cffi_rs::get;
+///
+/// let response = get("https://httpbin.org/get").unwrap();
+/// println!("{}", String::from_utf8_lossy(&response));
+/// ```
+pub fn get(url: &str) -> Result<Vec<u8>> {
+    Request::get(url).send()
+}
+
+/// Quick POST request (convenience function for simple cases)
+///
+/// For advanced usage with impersonate/proxies, use: `Request::post(url, data).impersonate(...).send()`
+///
+/// # Examples
+/// ```no_run
+/// use curl_cffi_rs::post;
+///
+/// let data = r#"{"key": "value"}"#;
+/// let response = post("https://httpbin.org/post", data).unwrap();
+/// ```
+pub fn post(url: &str, data: &str) -> Result<Vec<u8>> {
+    Request::post(url, data).send()
+}
 
 // Initialize curl globally once
 use std::sync::Once;
@@ -55,10 +174,8 @@ static INIT: Once = Once::new();
 
 /// Initialize libcurl globally (called automatically)
 pub(crate) fn init_curl() {
-    INIT.call_once(|| {
-        unsafe {
-            curl_sys::curl_global_init(curl_sys::CURL_GLOBAL_DEFAULT);
-        }
+    INIT.call_once(|| unsafe {
+        curl_sys::curl_global_init(curl_sys::CURL_GLOBAL_DEFAULT);
     });
 }
 
