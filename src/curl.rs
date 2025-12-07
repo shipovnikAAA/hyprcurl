@@ -350,9 +350,17 @@ impl Curl {
         if !self.headers.is_null() {
             unsafe {
                 curl_sys::curl_slist_free_all(self.headers);
+                // Reset headers in curl to prevent dangling pointer
+                curl_sys::curl_easy_setopt(
+                    self.handle,
+                    curl_sys::CURLOPT_HTTPHEADER,
+                    ptr::null::<curl_sys::curl_slist>(),
+                );
             }
             self.headers = ptr::null_mut();
         }
+        // Clear stored header strings
+        self.stored_headers.clear();
     }
 
     /// Get raw handle (for advanced use)
@@ -456,19 +464,21 @@ impl Curl {
         }
 
         // Set TLS cipher suites (skip if not supported)
-        let ciphers = browser.tls_ciphers();
-        if let Err(_) = self.setopt_str(CurlOpt::SslCipherList, ciphers) {
-            // Cipher list not supported, continue without it
-        }
+        // Temporarily disabled - may cause issues with some libcurl versions
+        // let ciphers = browser.tls_ciphers();
+        // if self.setopt_str(CurlOpt::SslCipherList, ciphers).is_err() {
+        //     // Cipher list not supported, continue without it
+        // }
 
         // Set TLS curves (skip if not supported)
-        let curves = browser.tls_curves();
-        if let Err(_) = self.setopt_str(CurlOpt::SslCurves, curves) {
-            // Curves not supported, continue without it
-        }
+        // Temporarily disabled - may cause issues with some libcurl versions
+        // let curves = browser.tls_curves();
+        // if self.setopt_str(CurlOpt::SslCurves, curves).is_err() {
+        //     // Curves not supported, continue without it
+        // }
 
         // Configure HTTP version (most modern browsers use HTTP/2)
-        if let Err(_) = self.set_http_version(HttpVersion::V2) {
+        if self.set_http_version(HttpVersion::V2).is_err() {
             // HTTP/2 not supported, fall back to HTTP/1.1
             let _ = self.set_http_version(HttpVersion::V1_1);
         }

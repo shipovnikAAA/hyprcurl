@@ -11,7 +11,10 @@ fn test_simple_get_request() {
     assert!(!response.is_empty(), "Response should not be empty");
 
     let body = String::from_utf8_lossy(&response);
-    assert!(body.contains("httpbin"), "Response should contain 'httpbin'");
+    assert!(
+        body.contains("httpbin"),
+        "Response should contain 'httpbin'"
+    );
 }
 
 #[test]
@@ -99,8 +102,7 @@ fn test_custom_headers() {
         .expect("Failed to add header");
 
     let mut buffer = Vec::new();
-    curl.perform(&mut buffer)
-        .expect("Request should succeed");
+    curl.perform(&mut buffer).expect("Request should succeed");
 
     let body = String::from_utf8_lossy(&buffer);
     assert!(
@@ -120,8 +122,7 @@ fn test_response_code() {
         .expect("Failed to set URL");
 
     let mut buffer = Vec::new();
-    curl.perform(&mut buffer)
-        .expect("Request should succeed");
+    curl.perform(&mut buffer).expect("Request should succeed");
 
     let status = curl
         .response_code()
@@ -136,8 +137,7 @@ fn test_404_response() {
         .expect("Failed to set URL");
 
     let mut buffer = Vec::new();
-    curl.perform(&mut buffer)
-        .expect("Request should succeed");
+    curl.perform(&mut buffer).expect("Request should succeed");
 
     let status = curl
         .response_code()
@@ -152,8 +152,7 @@ fn test_redirect_following() {
         .expect("Failed to set URL");
 
     let mut buffer = Vec::new();
-    curl.perform(&mut buffer)
-        .expect("Request should succeed");
+    curl.perform(&mut buffer).expect("Request should succeed");
 
     let effective_url = curl
         .effective_url()
@@ -171,12 +170,9 @@ fn test_response_timing() {
         .expect("Failed to set URL");
 
     let mut buffer = Vec::new();
-    curl.perform(&mut buffer)
-        .expect("Request should succeed");
+    curl.perform(&mut buffer).expect("Request should succeed");
 
-    let total_time = curl
-        .total_time()
-        .expect("Should be able to get total time");
+    let total_time = curl.total_time().expect("Should be able to get total time");
     assert!(
         total_time >= 1.0,
         "Total time should be at least 1 second for delay/1"
@@ -259,8 +255,5 @@ fn test_timeout_works() {
     let result = curl.perform(&mut buffer);
 
     // Request should fail with timeout
-    assert!(
-        result.is_err(),
-        "Request should fail due to timeout"
-    );
+    assert!(result.is_err(), "Request should fail due to timeout");
 }

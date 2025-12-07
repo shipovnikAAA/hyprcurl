@@ -18,7 +18,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = Request::post("https://httpbin.org/post", data).send()?;
 
     let body = String::from_utf8_lossy(&response);
-    println!("Response (first 500 chars):\n{}\n", body.chars().take(500).collect::<String>());
+    println!(
+        "Response (first 500 chars):\n{}\n",
+        body.chars().take(500).collect::<String>()
+    );
 
     // Method 3: POST with browser impersonation
     println!("3. POST with browser impersonation:");

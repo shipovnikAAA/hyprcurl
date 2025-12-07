@@ -103,7 +103,10 @@ fn test_browser_impersonation() {
 #[test]
 fn test_browser_user_agents() {
     let chrome = Browser::ChromeLatest.user_agent();
-    assert!(chrome.contains("Chrome"), "Chrome UA should contain 'Chrome'");
+    assert!(
+        chrome.contains("Chrome"),
+        "Chrome UA should contain 'Chrome'"
+    );
 
     let firefox = Browser::FirefoxLatest.user_agent();
     assert!(
@@ -112,7 +115,10 @@ fn test_browser_user_agents() {
     );
 
     let safari = Browser::SafariLatest.user_agent();
-    assert!(safari.contains("Safari"), "Safari UA should contain 'Safari'");
+    assert!(
+        safari.contains("Safari"),
+        "Safari UA should contain 'Safari'"
+    );
 
     let edge = Browser::EdgeLatest.user_agent();
     assert!(edge.contains("Edg"), "Edge UA should contain 'Edg'");
@@ -168,7 +174,8 @@ fn test_reset() {
     let mut curl = Curl::new().expect("Failed to initialize curl");
     curl.set_url("https://httpbin.org/get")
         .expect("Failed to set URL");
-    curl.add_header("X-Test: value").expect("Failed to add header");
+    curl.add_header("X-Test: value")
+        .expect("Failed to add header");
 
     // Reset should clear everything
     curl.reset();
