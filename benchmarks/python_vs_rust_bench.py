@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Benchmark comparison: Python curl_cffi vs Rust curl-cffi-rs
+Benchmark comparison: Python curl_cffi vs Rust hyprcurl
 
 Requirements:
-- pip install curl_cffi pandas matplotlib
+- uv add curl_cffi pandas matplotlib
 - cargo build --release --features python
 - Test server running on localhost:8000
 """
@@ -88,7 +88,7 @@ def bench_rust_convenience(url, iterations=1000):
 def run_benchmarks():
     """Run all benchmarks"""
     print("=" * 60)
-    print("Python curl_cffi vs Rust curl-cffi-rs Benchmark")
+    print("Python curl_cffi vs Rust hyprcurl Benchmark")
     print("=" * 60)
     print()
 

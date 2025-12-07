@@ -1,164 +1,236 @@
 # hyprcurl
 
-A high-performance Rust implementation of curl_cffi with browser fingerprinting support.
+A high-performance Rust HTTP client with browser impersonation and TLS fingerprinting support.
 
-## Overview
+> Rust implementation inspired by Python's [curl_cffi](https://github.com/yifeikong/curl_cffi)
 
-Rust rewrite of [curl_cffi](https://github.com/yifeikong/curl_cffi), demonstrating:
+## Installation
 
-## Features to be implemented
+### Rust
 
-- Type-safe curl wrapper
-- Synchronous API
-- Asynchronous API (tokio)
-- WebSocket support (placeholder)
-- Python bindings via PyO3
-- Browser fingerprinting support (via libcurl-impersonate)
-- Zero-copy I/O where possible
-- Comprehensive benchmarks
+```bash
+cargo add hyprcurl
+```
+
+### Python
+
+```bash
+# Build from source
+cargo build --release --features python
+pip install maturin
+maturin develop --release
+```
 
 ## Quick Start
 
-### Rust Library
+### Rust - Simple Requests
 
 ```rust
-use hyprcurl::{Curl, CurlError};
+use hyprcurl::{get, post};
 
-fn main() -> Result<(), CurlError> {
-    let mut curl = Curl::new()?;
-    curl.set_url("https://httpbin.org/get")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Simple GET
+    let response = get("https://httpbin.org/get")?;
+    println!("{}", String::from_utf8_lossy(&response));
 
-    let mut response = Vec::new();
-    curl.perform(&mut response)?;
+    // Simple POST
+    let data = r#"{"key": "value"}"#;
+    let response = post("https://httpbin.org/post", data)?;
 
-    println!("Status: {}", curl.response_code()?);
-    println!("Response: {}", String::from_utf8_lossy(&response));
     Ok(())
 }
 ```
 
-### Async Rust
+### Rust - Request Builder API
 
 ```rust
-use hyprcurl::{AsyncCurl, Curl};
+use hyprcurl::{Request, Browser};
 
-#[tokio::main]
-async fn main() {
-    let async_curl = AsyncCurl::new().unwrap();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // GET with browser impersonation
+    let response = Request::get("https://tls.browserleaks.com/json")
+        .impersonate(Browser::ChromeLatest)
+        .send()?;
 
-    let mut curl = Curl::new().unwrap();
-    curl.set_url("https://httpbin.org/get").unwrap();
+    // POST with browser impersonation and proxy
+    let response = Request::post("https://httpbin.org/post", r#"{"test": "data"}"#)
+        .impersonate(Browser::FirefoxLatest)
+        .proxies("socks5://localhost:1080")
+        .send()?;
 
-    let response = async_curl.perform(curl).await.unwrap();
-    println!("Got {} bytes", response.len());
+    Ok(())
 }
 ```
 
-### Python Bindings
+### Rust - Low-level API
+
+```rust
+use hyprcurl::{Curl, Browser, CurlOpt};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut curl = Curl::new()?;
+
+    // Configure request
+    curl.set_url("https://httpbin.org/get")?;
+    curl.set_browser_impersonation(Browser::ChromeLatest)?;
+    curl.add_header("X-Custom-Header: value")?;
+    curl.setopt_long(CurlOpt::Timeout, 30)?;
+
+    // Perform request
+    let mut buffer = Vec::new();
+    curl.perform(&mut buffer)?;
+
+    // Get response metadata
+    let status = curl.response_code()?;
+    let time = curl.total_time()?;
+
+    println!("Status: {}, Time: {:.2}s", status, time);
+    Ok(())
+}
+```
+
+### Python
 
 ```python
 import hyprcurl
 
-# Simple request
+# Simple GET
 response = hyprcurl.get("https://httpbin.org/get")
-print(response)
 
-# Advanced usage
-curl = hyprcurl.Curl()
-curl.set_url("https://httpbin.org/get")
-curl.add_header("User-Agent: MyApp/1.0")
-curl.impersonate("chrome110", True)
+# GET with browser impersonation
+response = hyprcurl.get(
+    "https://tls.browserleaks.com/json",
+    impersonate="chrome"
+)
 
-response = curl.perform()
-print(f"Status: {curl.response_code()}")
-print(f"Response: {response}")
+# POST with impersonation and proxy
+response = hyprcurl.post(
+    "https://httpbin.org/post",
+    data='{"key": "value"}',
+    impersonate="firefox121",
+    proxies="socks5://localhost:1080"
+)
 ```
 
-## Installation
+## Browser Impersonation
 
-### Build from source
+Supported browsers:
+
+```rust
+Browser::ChromeLatest       // Chrome 131
+Browser::Chrome { version: 110 }
+Browser::FirefoxLatest      // Firefox 121
+Browser::Firefox { version: 115 }
+Browser::SafariLatest       // Safari 18.0
+Browser::Safari { version: "17.5".into() }
+Browser::EdgeLatest         // Edge 131
+Browser::Edge { version: 120 }
+```
+
+Each browser impersonation sets:
+- User-Agent header
+- HTTP/2 settings
+- TLS cipher suites
+- TLS curves (including X25519Kyber768 for Chrome)
+- SSL/TLS signature algorithms
+- ALPN protocols
+
+## Dependencies
+
+- **libcurl** - System libcurl installation required
+- **Rust 1.70+** - For building from source
+- **Python 3.8+** - For Python bindings (optional)
+
+## Testing
+
+Run the comprehensive test suite:
 
 ```bash
-# Rust library
-cargo build --release
+# Run all tests
+cargo test
 
-# With async support
-cargo build --release --features async
+# Run integration tests (makes real HTTP requests)
+cargo test --test integration_tests
 
-# With Python bindings
-cargo build --release --features python
-maturin develop --release
+# Run with output
+cargo test -- --nocapture
 ```
-
-### Dependencies
-
-- libcurl (or libcurl-impersonate for browser fingerprinting)
-- Rust 1.70+
-- Python 3.8+ (for Python bindings)
 
 ## Benchmarks
 
-### Setup
+Compare performance with Python curl_cffi:
 
-1. Start the test server:
+### 1. Start the test server
+
 ```bash
 cd benchmarks
-python server.py
+uv init
+uv add curl_cffi pandas matplotlib
+uv run server.py
 ```
 
-2. Run Rust benchmarks:
+### 2. Build Rust library
+
 ```bash
-cargo bench
+cargo build --release --features python
+cp target/release/libhyprcurl.so target/release/hyprcurl.so
 ```
 
-3. Run Python vs Rust comparison:
+### 3. Run benchmarks
+
 ```bash
-python benchmarks/python_vs_rust_bench.py
+cd benchmarks
+uv run python_vs_rust_bench.py
 ```
+
+Results:
+- CSV file: `python_vs_rust_bench.csv`
+- Chart: `python_vs_rust_bench.png`
+- Console output with speedup analysis
 
 ## Documentation
 
-This project includes comprehensive documentation in the form of a book (similar to the Rust Book).
+### Book-style Documentation
 
-### Building the Documentation
-
-To build and view the documentation:
+Build and view the comprehensive guide:
 
 ```bash
-# Build the book
-mdbook build book
-
-# Serve the book locally and open in browser
-mdbook serve book --open
-
-# The book will be available at http://localhost:3000
-```
-
-### Installing mdBook
-
-If you don't have mdBook installed:
-
-```bash
+# Install mdBook
 cargo install mdbook
+
+# Build and serve the book
+mdbook serve book --open
+# Opens at http://localhost:3000
 ```
 
 ### API Documentation
 
-To generate and view the API documentation:
+Generate Rust API docs:
 
 ```bash
-# Generate API docs for the library
+# Standard docs
 cargo doc --no-deps --open
 
-# Generate docs with all features enabled
+# With all features
 cargo doc --all-features --open
 ```
 
-The documentation covers:
-- Getting started guides
-- Browser impersonation
-- SSL/TLS configuration
-- Async/await usage
-- WebSocket support
-- Python bindings
-- Complete API reference
+## Examples
+
+See the [`examples/`](examples/) directory for complete working examples:
+
+- [`simple_get.rs`](examples/simple_get.rs) - Basic GET requests
+- [`browser_impersonation.rs`](examples/browser_impersonation.rs) - All browser types
+- [`proxy_usage.rs`](examples/proxy_usage.rs) - HTTP and SOCKS5 proxies
+- [`post_request.rs`](examples/post_request.rs) - POST with various options
+- [`comprehensive.rs`](examples/comprehensive.rs) - Full feature showcase
+
+Run examples:
+```bash
+cargo run --example simple_get
+cargo run --example browser_impersonation
+```
+
+## Acknowledgments
+
+Inspired by [curl_cffi](https://github.com/yifeikong/curl_cffi) - the excellent Python library for browser impersonation.
