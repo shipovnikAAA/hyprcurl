@@ -1,3 +1,7 @@
+[![Crates.io](https://img.shields.io/crates/v/hyprcurl.svg)](https://crates.io/crates/hyprcurl)
+[![Documentation](https://docs.rs/hyprcurl/badge.svg)](https://docs.rs/hyprcurl)
+[![License](https://img.shields.io/crates/l/hyprcurl.svg)](https://github.com/Aditya-PS-05/hyprcurl#license)
+
 # hyprcurl
 
 A high-performance Rust HTTP client with browser impersonation and TLS fingerprinting support.
